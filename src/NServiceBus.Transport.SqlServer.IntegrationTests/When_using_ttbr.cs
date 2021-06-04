@@ -1,12 +1,9 @@
-﻿// ReSharper disable RedundantArgumentNameForLiteralExpression
-// ReSharper disable RedundantArgumentName
-
-namespace NServiceBus.Transport.SqlServer.IntegrationTests
+﻿namespace NServiceBus.Transport.SqlServer.IntegrationTests
 {
     using System;
     using System.Collections.Generic;
+    using System.Threading;
     using System.Threading.Tasks;
-    using DeliveryConstraints;
     using Extensibility;
     using NUnit.Framework;
     using Performance.TimeToBeReceived;
@@ -33,10 +30,10 @@ namespace NServiceBus.Transport.SqlServer.IntegrationTests
 
                     var operation = new TransportOperation(
                         new OutgoingMessage("1", new Dictionary<string, string>(), new byte[0]),
-                        new UnicastAddressTag(validAddress)
+                        new UnicastAddressTag(ValidAddress)
                     );
 
-                    await dispatcher.Dispatch(new TransportOperations(operation), transportTransaction, context).ConfigureAwait(false);
+                    await dispatcher.Dispatch(new TransportOperations(operation), transportTransaction).ConfigureAwait(false);
                     transaction.Commit();
                 }
 
@@ -66,10 +63,10 @@ namespace NServiceBus.Transport.SqlServer.IntegrationTests
                     };
                     var operation = new TransportOperation(
                         new OutgoingMessage("1", headers, new byte[0]),
-                        new UnicastAddressTag(validAddress)
+                        new UnicastAddressTag(ValidAddress)
                     );
 
-                    await dispatcher.Dispatch(new TransportOperations(operation), transportTransaction, context).ConfigureAwait(false);
+                    await dispatcher.Dispatch(new TransportOperations(operation), transportTransaction).ConfigureAwait(false);
                     transaction.Commit();
                 }
 
@@ -95,15 +92,14 @@ namespace NServiceBus.Transport.SqlServer.IntegrationTests
 
                     var operation = new TransportOperation(
                         new OutgoingMessage("1", new Dictionary<string, string>(), new byte[0]),
-                        new UnicastAddressTag(validAddress),
-                        DispatchConsistency.Default,
-                        new List<DeliveryConstraint>
+                        new UnicastAddressTag(ValidAddress),
+                        new DispatchProperties
                         {
-                            new DiscardIfNotReceivedBefore(TimeSpan.FromMinutes(-1)) //Discard immediately
+                            DiscardIfNotReceivedBefore = new DiscardIfNotReceivedBefore(TimeSpan.FromMinutes(-1)) //Discard immediately
                         }
                     );
 
-                    await dispatcher.Dispatch(new TransportOperations(operation), transportTransaction, context).ConfigureAwait(false);
+                    await dispatcher.Dispatch(new TransportOperations(operation), transportTransaction).ConfigureAwait(false);
                     transaction.Commit();
                 }
 
@@ -118,10 +114,10 @@ namespace NServiceBus.Transport.SqlServer.IntegrationTests
             PrepareAsync().GetAwaiter().GetResult();
         }
 
-        async Task PrepareAsync()
+        async Task PrepareAsync(CancellationToken cancellationToken = default)
         {
-            var addressParser = new QueueAddressTranslator("nservicebus", "dbo", null, new QueueSchemaAndCatalogSettings());
-            var tableCache = new TableBasedQueueCache(addressParser);
+            var addressParser = new QueueAddressTranslator("nservicebus", "dbo", null, new QueueSchemaAndCatalogOptions());
+            var tableCache = new TableBasedQueueCache(addressParser, true);
 
             var connectionString = Environment.GetEnvironmentVariable("SqlServerTransportConnectionString");
             if (string.IsNullOrEmpty(connectionString))
@@ -131,29 +127,27 @@ namespace NServiceBus.Transport.SqlServer.IntegrationTests
 
             sqlConnectionFactory = SqlConnectionFactory.Default(connectionString);
 
-            await CreateOutputQueueIfNecessary(addressParser, sqlConnectionFactory);
+            await CreateOutputQueueIfNecessary(addressParser, sqlConnectionFactory, cancellationToken);
 
-            await PurgeOutputQueue(addressParser);
+            await PurgeOutputQueue(addressParser, cancellationToken);
 
             dispatcher = new MessageDispatcher(addressParser, new NoOpMulticastToUnicastConverter(), tableCache, null, sqlConnectionFactory);
         }
 
-        Task PurgeOutputQueue(QueueAddressTranslator addressParser)
+        Task PurgeOutputQueue(QueueAddressTranslator addressParser, CancellationToken cancellationToken = default)
         {
             purger = new QueuePurger(sqlConnectionFactory);
-            var queueAddress = addressParser.Parse(validAddress);
-            queue = new TableBasedQueue(queueAddress.QualifiedTableName, queueAddress.Address);
+            var queueAddress = addressParser.Parse(ValidAddress);
+            queue = new TableBasedQueue(queueAddress.QualifiedTableName, queueAddress.Address, true);
 
-            return purger.Purge(queue);
+            return purger.Purge(queue, cancellationToken);
         }
 
-        static Task CreateOutputQueueIfNecessary(QueueAddressTranslator addressParser, SqlConnectionFactory sqlConnectionFactory)
+        static Task CreateOutputQueueIfNecessary(QueueAddressTranslator addressParser, SqlConnectionFactory sqlConnectionFactory, CancellationToken cancellationToken = default)
         {
-            var queueCreator = new QueueCreator(sqlConnectionFactory, addressParser, new CanonicalQueueAddress("Delayed", "dbo", "nservicebus"));
-            var queueBindings = new QueueBindings();
-            queueBindings.BindReceiving(validAddress);
+            var queueCreator = new QueueCreator(sqlConnectionFactory, addressParser);
 
-            return queueCreator.CreateQueueIfNecessary(queueBindings, "");
+            return queueCreator.CreateQueueIfNecessary(new[] { ValidAddress }, new CanonicalQueueAddress("Delayed", "dbo", "nservicebus"), cancellationToken);
         }
 
         QueuePurger purger;
@@ -161,11 +155,11 @@ namespace NServiceBus.Transport.SqlServer.IntegrationTests
         TableBasedQueue queue;
         SqlConnectionFactory sqlConnectionFactory;
 
-        const string validAddress = "TTBRTests";
+        const string ValidAddress = "TTBRTests";
 
         class NoOpMulticastToUnicastConverter : IMulticastToUnicastConverter
         {
-            public Task<List<UnicastTransportOperation>> Convert(MulticastTransportOperation transportOperation)
+            public Task<List<UnicastTransportOperation>> Convert(MulticastTransportOperation transportOperation, CancellationToken cancellationToken = default)
             {
                 return Task.FromResult(new List<UnicastTransportOperation>());
             }

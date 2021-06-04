@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using NServiceBus;
 using NServiceBus.Configuration.AdvancedExtensibility;
 using NServiceBus.Extensibility;
@@ -38,13 +40,13 @@ public class TestingInMemorySubscriptionPersistence : Feature
     protected override void Setup(FeatureConfigurationContext context)
     {
         var storageInstance = context.Settings.GetOrDefault<TestingInMemorySubscriptionStorage>("InMemoryPersistence.StorageInstance");
-        context.Container.RegisterSingleton<ISubscriptionStorage>(storageInstance ?? new TestingInMemorySubscriptionStorage());
+        context.Services.AddSingleton<ISubscriptionStorage>(storageInstance ?? new TestingInMemorySubscriptionStorage());
     }
 }
 
 public class TestingInMemorySubscriptionStorage : ISubscriptionStorage
 {
-    public Task Subscribe(Subscriber subscriber, MessageType messageType, ContextBag context)
+    public Task Subscribe(Subscriber subscriber, MessageType messageType, ContextBag context, CancellationToken cancellationToken = default)
     {
         var dict = storage.GetOrAdd(messageType, type => new ConcurrentDictionary<string, Subscriber>(StringComparer.OrdinalIgnoreCase));
 
@@ -57,7 +59,7 @@ public class TestingInMemorySubscriptionStorage : ISubscriptionStorage
         return $"{subscriber.TransportAddress ?? ""}_{subscriber.Endpoint ?? ""}";
     }
 
-    public Task Unsubscribe(Subscriber subscriber, MessageType messageType, ContextBag context)
+    public Task Unsubscribe(Subscriber subscriber, MessageType messageType, ContextBag context, CancellationToken cancellationToken = default)
     {
         if (storage.TryGetValue(messageType, out var dict))
         {
@@ -66,7 +68,7 @@ public class TestingInMemorySubscriptionStorage : ISubscriptionStorage
         return Task.FromResult(true);
     }
 
-    public Task<IEnumerable<Subscriber>> GetSubscriberAddressesForMessage(IEnumerable<MessageType> messageTypes, ContextBag context)
+    public Task<IEnumerable<Subscriber>> GetSubscriberAddressesForMessage(IEnumerable<MessageType> messageTypes, ContextBag context, CancellationToken cancellationToken = default)
     {
         var result = new HashSet<Subscriber>();
         foreach (var m in messageTypes)

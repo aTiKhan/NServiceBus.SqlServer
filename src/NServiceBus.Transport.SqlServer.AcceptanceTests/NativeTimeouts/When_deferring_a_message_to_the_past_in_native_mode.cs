@@ -17,7 +17,7 @@
                 {
                     var options = new SendOptions();
 
-                    options.DoNotDeliverBefore(DateTime.Now.AddHours(-1));
+                    options.DoNotDeliverBefore(DateTimeOffset.UtcNow.AddHours(-1));
                     options.RouteToThisEndpoint();
 
                     return bus.Send(new MyMessage(), options);
@@ -37,16 +37,20 @@
         {
             public Endpoint()
             {
-                EndpointSetup<DefaultServer>(config => config.UseTransport<SqlServerTransport>());
+                EndpointSetup<DefaultServer>();
             }
 
             public class MyMessageHandler : IHandleMessages<MyMessage>
             {
-                public Context Context { get; set; }
+                readonly Context scenarioContext;
+                public MyMessageHandler(Context scenarioContext)
+                {
+                    this.scenarioContext = scenarioContext;
+                }
 
                 public Task Handle(MyMessage message, IMessageHandlerContext context)
                 {
-                    Context.MessageReceived = true;
+                    scenarioContext.MessageReceived = true;
                     return Task.FromResult(0);
                 }
             }

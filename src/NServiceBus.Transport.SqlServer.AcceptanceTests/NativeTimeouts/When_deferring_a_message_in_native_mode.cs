@@ -22,7 +22,7 @@
                     options.DelayDeliveryWith(delay);
                     options.RouteToThisEndpoint();
 
-                    c.SentAt = DateTime.UtcNow;
+                    c.SentAt = DateTimeOffset.UtcNow;
 
                     return session.Send(new MyMessage(), options);
                 }))
@@ -35,25 +35,29 @@
         public class Context : ScenarioContext
         {
             public bool WasCalled { get; set; }
-            public DateTime SentAt { get; set; }
-            public DateTime ReceivedAt { get; set; }
+            public DateTimeOffset SentAt { get; set; }
+            public DateTimeOffset ReceivedAt { get; set; }
         }
 
         public class Endpoint : EndpointConfigurationBuilder
         {
             public Endpoint()
             {
-                EndpointSetup<DefaultServer>(config => config.UseTransport<SqlServerTransport>());
+                EndpointSetup<DefaultServer>();
             }
 
             public class MyMessageHandler : IHandleMessages<MyMessage>
             {
-                public Context Context { get; set; }
+                readonly Context scenarioContext;
+                public MyMessageHandler(Context scenarioContext)
+                {
+                    this.scenarioContext = scenarioContext;
+                }
 
                 public Task Handle(MyMessage message, IMessageHandlerContext context)
                 {
-                    Context.ReceivedAt = DateTime.UtcNow;
-                    Context.WasCalled = true;
+                    scenarioContext.ReceivedAt = DateTimeOffset.UtcNow;
+                    scenarioContext.WasCalled = true;
                     return Task.FromResult(0);
                 }
             }

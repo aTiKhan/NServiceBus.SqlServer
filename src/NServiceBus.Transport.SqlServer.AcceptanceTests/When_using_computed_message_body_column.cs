@@ -17,7 +17,7 @@
                 .Run();
 
             Assert.IsTrue(context.WasCalled);
-      }
+        }
         class Context : ScenarioContext
         {
             public bool WasCalled { get; set; }
@@ -29,18 +29,22 @@
             {
                 EndpointSetup<DefaultServer>(config =>
                 {
-                    var transportConfig = config.UseTransport<SqlServerTransport>();
-                    transportConfig.CreateMessageBodyComputedColumn();
+                    var transportConfig = config.ConfigureSqlServerTransport();
+                    transportConfig.CreateMessageBodyComputedColumn = true;
                 });
             }
 
             public class MyMessageHandler : IHandleMessages<MyMessage>
             {
-                public Context Context { get; set; }
+                readonly Context scenarioContext;
+                public MyMessageHandler(Context scenarioContext)
+                {
+                    this.scenarioContext = scenarioContext;
+                }
 
                 public Task Handle(MyMessage message, IMessageHandlerContext context)
                 {
-                    Context.WasCalled = true;
+                    scenarioContext.WasCalled = true;
                     return Task.FromResult(0);
                 }
             }

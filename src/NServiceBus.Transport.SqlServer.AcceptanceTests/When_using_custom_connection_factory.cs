@@ -10,7 +10,6 @@
     using AcceptanceTesting;
     using AcceptanceTesting.Customization;
     using NServiceBus.AcceptanceTests;
-    using NServiceBus.AcceptanceTests.EndpointTemplates;
     using NUnit.Framework;
 
     public class When_using_custom_connection_factory : NServiceBusAcceptanceTest
@@ -40,29 +39,32 @@
         {
             public Endpoint()
             {
-                EndpointSetup<DefaultServer>(c =>
+                var transport = new SqlServerTransport(async cancellationToken =>
+                {
+                    var connection = new SqlConnection(GetConnectionString());
+
+                    await connection.OpenAsync(cancellationToken);
+
+                    return connection;
+                });
+
+                EndpointSetup(new CustomizedServer(transport), (c, sd) =>
                 {
                     c.OverridePublicReturnAddress($"{Conventions.EndpointNamingConvention(typeof(Endpoint))}@dbo@nservicebus");
-                    c.UseTransport<SqlServerTransport>()
-                        .ConnectionString("this-will-not-work")
-                        .UseCustomSqlConnectionFactory(async () =>
-                        {
-                            var connection = new SqlConnection(GetConnectionString());
-
-                            await connection.OpenAsync();
-
-                            return connection;
-                        });
                 });
             }
 
             class Handler : IHandleMessages<Message>
             {
-                public Context Context { get; set; }
+                readonly Context scenarioContext;
+                public Handler(Context scenarioContext)
+                {
+                    this.scenarioContext = scenarioContext;
+                }
 
                 public Task Handle(Message message, IMessageHandlerContext context)
                 {
-                    Context.MessageReceived = true;
+                    scenarioContext.MessageReceived = true;
 
                     return Task.FromResult(0);
                 }

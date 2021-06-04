@@ -46,8 +46,7 @@
                         b.DoNotFailOnErrorMessages();
                         b.CustomConfig(c =>
                         {
-                            c.UseTransport<SqlServerTransport>()
-                                .Transactions(txMode);
+                            c.ConfigureSqlServerTransport().TransportTransactionMode = txMode;
                         });
                         b.When(async (bus, c) =>
                         {
@@ -65,7 +64,7 @@
                                 command.Parameters.Add("CorrelationId", SqlDbType.UniqueIdentifier).Value = guid;
                                 command.Parameters.Add("ReplyToAddress", SqlDbType.VarChar).Value = "";
                                 command.Parameters.Add("Recoverable", SqlDbType.Bit).Value = true;
-                                command.Parameters.Add("Expires", SqlDbType.DateTime).Value = DateTime.Now.AddHours(1);
+                                command.Parameters.Add("Expires", SqlDbType.DateTime).Value = DateTime.UtcNow.AddHours(1);
                                 command.Parameters.Add("Headers", SqlDbType.VarChar).Value = "<corrupted headers";
 
                                 command.Parameters.Add("Body", SqlDbType.VarBinary).Value = Encoding.UTF8.GetBytes("");
@@ -134,7 +133,6 @@ END";
             {
                 EndpointSetup<DefaultServer>(c =>
                 {
-                    c.UseTransport<SqlServerTransport>();
                     c.SendFailedMessagesTo(errorQueueName);
                 });
             }

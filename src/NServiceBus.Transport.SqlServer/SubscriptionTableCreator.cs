@@ -7,6 +7,7 @@ namespace NServiceBus.Transport.SqlServer
     using Microsoft.Data.SqlClient;
 #endif
     using System.Threading.Tasks;
+    using System.Threading;
 
     class SubscriptionTableCreator
     {
@@ -18,22 +19,36 @@ namespace NServiceBus.Transport.SqlServer
             this.tableName = tableName;
             this.connectionFactory = connectionFactory;
         }
-        public async Task CreateIfNecessary()
+        public async Task CreateIfNecessary(CancellationToken cancellationToken = default)
         {
-            using (var connection = await connectionFactory.OpenNewConnection().ConfigureAwait(false))
-            using (var transaction = connection.BeginTransaction())
+            using (var connection = await connectionFactory.OpenNewConnection(cancellationToken).ConfigureAwait(false))
             {
-#pragma warning disable 618
-                var sql = string.Format(SqlConstants.CreateSubscriptionTableText, tableName.QuotedQualifiedName, tableName.QuotedCatalog);
-#pragma warning restore 618
-                using (var command = new SqlCommand(sql, connection, transaction)
+                try
                 {
-                    CommandType = CommandType.Text
-                })
-                {
-                    await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+                    using (var transaction = connection.BeginTransaction())
+                    {
+                        var sql = string.Format(SqlConstants.CreateSubscriptionTableText, tableName.QuotedQualifiedName, tableName.QuotedCatalog);
+
+                        using (var command = new SqlCommand(sql, connection, transaction)
+                        {
+                            CommandType = CommandType.Text
+                        })
+                        {
+                            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                        }
+
+                        transaction.Commit();
+                    }
                 }
-                transaction.Commit();
+                catch (SqlException e) when (e.Number == 2714 || e.Number == 1913) //Object already exists
+                {
+                    //Table creation scripts are based on sys.objects metadata views.
+                    //It looks that these views are not fully transactional and might
+                    //not return information on already created table under heavy load.
+                    //This in turn can result in executing table create or index create queries
+                    //for objects that already exists. These queries will fail with
+                    // 2714 (table) and 1913 (index) error codes.
+                }
             }
         }
     }

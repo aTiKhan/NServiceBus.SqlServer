@@ -12,7 +12,7 @@
         [Test]
         public void Should_throw()
         {
-            var exception = Assert.ThrowsAsync<Exception>(async() => await Scenario.Define<Context>()
+            var exception = Assert.ThrowsAsync<Exception>(async () => await Scenario.Define<Context>()
                 .WithEndpoint<Endpoint>(b => b.When((session, c) =>
                 {
                     var options = new SendOptions();
@@ -36,16 +36,20 @@
         {
             public Endpoint()
             {
-                EndpointSetup<DefaultServer>(config => config.UseTransport<SqlServerTransport>());
+                EndpointSetup<DefaultServer>();
             }
 
             public class MyMessageHandler : IHandleMessages<MyMessage>
             {
-                public Context Context { get; set; }
+                readonly Context scenarioContext;
+                public MyMessageHandler(Context scenarioContext)
+                {
+                    this.scenarioContext = scenarioContext;
+                }
 
                 public Task Handle(MyMessage message, IMessageHandlerContext context)
                 {
-                    Context.WasCalled = true;
+                    scenarioContext.WasCalled = true;
                     return Task.FromResult(0);
                 }
             }

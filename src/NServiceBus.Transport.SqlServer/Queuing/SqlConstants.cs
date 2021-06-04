@@ -107,8 +107,7 @@ IF (@NOCOUNT = 'ON') SET NOCOUNT ON;
 IF (@NOCOUNT = 'OFF') SET NOCOUNT OFF;";
 
         public static readonly string PeekText = @"
-SELECT count(*) Id
-FROM (SELECT TOP {1} * FROM {0} WITH (READPAST)) as count_table;";
+SELECT isnull(cast(max([RowVersion]) - min([RowVersion]) + 1 AS int), 0) Id FROM {0} WITH (nolock)";
 
         public static readonly string AddMessageBodyStringColumn = @"
 IF NOT EXISTS (
@@ -164,33 +163,39 @@ BEGIN
     RETURN
 END
 
-CREATE TABLE {0} (
-    Id uniqueidentifier NOT NULL,
-    CorrelationId varchar(255),
-    ReplyToAddress varchar(255),
-    Recoverable bit NOT NULL,
-    Expires datetime,
-    Headers nvarchar(max) NOT NULL,
-    Body varbinary(max),
-    RowVersion bigint IDENTITY(1,1) NOT NULL
-);
+BEGIN TRY
+    CREATE TABLE {0} (
+        Id uniqueidentifier NOT NULL,
+        CorrelationId varchar(255),
+        ReplyToAddress varchar(255),
+        Recoverable bit NOT NULL,
+        Expires datetime,
+        Headers nvarchar(max) NOT NULL,
+        Body varbinary(max),
+        RowVersion bigint IDENTITY(1,1) NOT NULL
+    );
 
-CREATE CLUSTERED INDEX Index_RowVersion ON {0}
-(
-    RowVersion
-)
+    CREATE NONCLUSTERED INDEX Index_RowVersion ON {0}
+    (
+	    [RowVersion] ASC
+    )
 
-CREATE NONCLUSTERED INDEX Index_Expires ON {0}
-(
-    Expires
-)
-INCLUDE
-(
-    Id,
-    RowVersion
-)
-WHERE
-    Expires IS NOT NULL
+    CREATE NONCLUSTERED INDEX Index_Expires ON {0}
+    (
+        Expires
+    )
+    INCLUDE
+    (
+        Id,
+        RowVersion
+    )
+    WHERE
+        Expires IS NOT NULL
+END TRY
+BEGIN CATCH
+    EXEC sp_releaseapplock @Resource = '{0}_lock';
+    THROW;
+END CATCH;
 
 EXEC sp_releaseapplock @Resource = '{0}_lock'";
 
@@ -214,17 +219,23 @@ BEGIN
     RETURN
 END
 
-CREATE TABLE {0} (
-    Headers nvarchar(max) NOT NULL,
-    Body varbinary(max),
-    Due datetime NOT NULL,
-    RowVersion bigint IDENTITY(1,1) NOT NULL
-);
+BEGIN TRY
+    CREATE TABLE {0} (
+        Headers nvarchar(max) NOT NULL,
+        Body varbinary(max),
+        Due datetime NOT NULL,
+        RowVersion bigint IDENTITY(1,1) NOT NULL
+    );
 
-CREATE NONCLUSTERED INDEX [Index_Due] ON {0}
-(
-    [Due]
-)
+    CREATE NONCLUSTERED INDEX [Index_Due] ON {0}
+    (
+        [Due]
+    )
+END TRY
+BEGIN CATCH
+    EXEC sp_releaseapplock @Resource = '{0}_lock';
+    THROW;
+END CATCH;
 
 EXEC sp_releaseapplock @Resource = '{0}_lock'";
 
@@ -237,9 +248,20 @@ WHERE RowVersion
 
         public static readonly string CheckIfExpiresIndexIsPresent = @"
 SELECT COUNT(*)
-FROM sys.indexes
-WHERE name = 'Index_Expires'
-    AND object_id = OBJECT_ID('{0}')";
+FROM sys.indexes i
+INNER JOIN sys.index_columns AS ic ON ic.index_id = i.index_id AND ic.object_id = i.object_id AND ic.key_ordinal = 1
+INNER JOIN sys.columns AS c ON c.column_id = ic.column_id AND c.object_id = ic.object_id
+WHERE i.object_id = OBJECT_ID('{0}')
+AND c.name = 'Expires'";
+
+        public static readonly string CheckIfNonClusteredRowVersionIndexIsPresent = @"
+SELECT COUNT(*)
+FROM sys.indexes i
+INNER JOIN sys.index_columns AS ic ON ic.index_id = i.index_id AND ic.object_id = i.object_id AND ic.key_ordinal = 1
+INNER JOIN sys.columns AS c ON c.column_id = ic.column_id AND c.object_id = ic.object_id
+WHERE i.object_id = OBJECT_ID('{0}')
+AND c.name = 'RowVersion'
+AND i.type = 2";
 
         public static readonly string CheckHeadersColumnType = @"
 SELECT t.name
@@ -269,16 +291,23 @@ BEGIN
     RETURN
 END
 
-CREATE TABLE {0} (
-    QueueAddress NVARCHAR(200) NOT NULL,
-    Endpoint NVARCHAR(200),
-    Topic NVARCHAR(200) NOT NULL,
-    PRIMARY KEY CLUSTERED
-    (
-        Endpoint,
-        Topic
+BEGIN TRY
+    CREATE TABLE {0} (
+        QueueAddress NVARCHAR(200) NOT NULL,
+        Endpoint NVARCHAR(200) NOT NULL,
+        Topic NVARCHAR(200) NOT NULL,
+        PRIMARY KEY CLUSTERED
+        (
+            Endpoint,
+            Topic
+        )
     )
-)
+END TRY
+BEGIN CATCH
+    EXEC sp_releaseapplock @Resource = '{0}_lock';
+    THROW;
+END CATCH;
+
 EXEC sp_releaseapplock @Resource = '{0}_lock'";
 
         public static readonly string SubscribeText = @"

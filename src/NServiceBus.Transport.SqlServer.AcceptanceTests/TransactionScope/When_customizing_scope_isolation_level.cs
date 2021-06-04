@@ -38,28 +38,32 @@
         {
             public Endpoint()
             {
-                EndpointSetup<DefaultServer>(busConfiguration =>
+                EndpointSetup<DefaultServer>(c =>
                 {
-                    busConfiguration.UseTransport<SqlServerTransport>()
-                        .Transactions(TransportTransactionMode.TransactionScope)
-                        .TransactionScopeOptions(isolationLevel: IsolationLevel.RepeatableRead);
+                    var transport = c.ConfigureSqlServerTransport();
+                    transport.TransportTransactionMode = TransportTransactionMode.TransactionScope;
+                    transport.TransactionScope.IsolationLevel = IsolationLevel.RepeatableRead;
                 });
             }
 
             class MyMessageHandler : IHandleMessages<MyMessage>
             {
-                public Context Context { get; set; }
+                readonly Context scenarioContext;
+                public MyMessageHandler(Context scenarioContext)
+                {
+                    this.scenarioContext = scenarioContext;
+                }
 
                 public Task Handle(MyMessage message, IMessageHandlerContext context)
                 {
                     var ambientTransactionPresent = Transaction.Current != null;
 
-                    Context.AmbientTransactionPresent = ambientTransactionPresent;
+                    scenarioContext.AmbientTransactionPresent = ambientTransactionPresent;
                     if (ambientTransactionPresent)
                     {
-                        Context.IsolationLevel = Transaction.Current.IsolationLevel;
+                        scenarioContext.IsolationLevel = Transaction.Current.IsolationLevel;
                     }
-                    Context.Done = true;
+                    scenarioContext.Done = true;
 
                     return Task.FromResult(0);
                 }

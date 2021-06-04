@@ -39,8 +39,7 @@
                 {
                     b.CustomConfig(c =>
                     {
-                        c.UseTransport<SqlServerTransport>()
-                            .Transactions(transactionMode);
+                        c.ConfigureSqlServerTransport().TransportTransactionMode = transactionMode;
                     });
                     b.When(async (bus, c) =>
                     {
@@ -61,7 +60,7 @@
                 connection.Open();
                 using (var command = new SqlCommand($"SELECT COUNT(*) FROM [dbo].[{endpoint}]", connection))
                 {
-                    var numberOfMessagesInQueue = (int) command.ExecuteScalar();
+                    var numberOfMessagesInQueue = (int)command.ExecuteScalar();
                     return numberOfMessagesInQueue == 0;
                 }
             }
@@ -87,11 +86,15 @@
 
             class Handler : IHandleMessages<Message>
             {
-                public Context Context { get; set; }
+                readonly Context scenarioContext;
+                public Handler(Context scenarioContext)
+                {
+                    this.scenarioContext = scenarioContext;
+                }
 
                 public Task Handle(Message message, IMessageHandlerContext context)
                 {
-                    Context.MessageWasHandled = true;
+                    scenarioContext.MessageWasHandled = true;
                     return Task.FromResult(0);
                 }
             }

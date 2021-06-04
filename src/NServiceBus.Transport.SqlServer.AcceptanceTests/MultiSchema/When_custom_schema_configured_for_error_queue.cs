@@ -44,7 +44,8 @@
                         .Immediate(i => i.NumberOfRetries(0))
                         .Delayed(d => d.NumberOfRetries(0));
 
-                    c.UseTransport<SqlServerTransport>().UseSchemaForQueue(errorSpyName, ErrorSpySchema);
+                    var transport = c.ConfigureSqlServerTransport();
+                    transport.SchemaAndCatalog.UseSchemaForQueue(errorSpyName, ErrorSpySchema);
                 });
             }
 
@@ -63,17 +64,21 @@
             {
                 EndpointSetup<DefaultServer>(c =>
                 {
-                    c.UseTransport<SqlServerTransport>().DefaultSchema(ErrorSpySchema);
+                    c.ConfigureSqlServerTransport().DefaultSchema = ErrorSpySchema;
                 });
             }
 
             class Handler : IHandleMessages<Message>
             {
-                public Context Context { get; set; }
+                readonly Context scenarioContext;
+                public Handler(Context scenarioContext)
+                {
+                    this.scenarioContext = scenarioContext;
+                }
 
                 public Task Handle(Message message, IMessageHandlerContext context)
                 {
-                    Context.FailedMessageProcessed = true;
+                    scenarioContext.FailedMessageProcessed = true;
 
                     return Task.FromResult(0);
                 }

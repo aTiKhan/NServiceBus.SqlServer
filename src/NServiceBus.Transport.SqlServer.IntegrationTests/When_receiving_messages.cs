@@ -1,7 +1,7 @@
 ﻿namespace NServiceBus.Transport.SqlServer.IntegrationTests
 {
     using System;
-    using System.Collections.Generic;
+    using System.Linq;
 #if SYSTEMDATASQLCLIENT
     using System.Data.SqlClient;
 #else
@@ -16,14 +16,15 @@
     public class When_receiving_messages
     {
         [Test]
-        public async Task Should_stop_pumping_messages_after_first_unsuccessful_receive()
+        public async Task Should_stop_receiving_messages_after_first_unsuccessful_receive()
         {
             var successfulReceives = 46;
             var queueSize = 1000;
 
             var parser = new QueueAddressTranslator("nservicebus", "dbo", null, null);
 
-            var inputQueue = new FakeTableBasedQueue(parser.Parse("input").QualifiedTableName, queueSize, successfulReceives);
+            var inputQueueAddress = parser.Parse("input").Address;
+            var inputQueue = new FakeTableBasedQueue(inputQueueAddress, queueSize, successfulReceives);
 
             var connectionString = Environment.GetEnvironmentVariable("SqlServerTransportConnectionString");
             if (string.IsNullOrEmpty(connectionString))
@@ -31,35 +32,43 @@
                 connectionString = @"Data Source=.\SQLEXPRESS;Initial Catalog=nservicebus;Integrated Security=True";
             }
 
-            var sqlConnectionFactory = SqlConnectionFactory.Default(connectionString);
+            var transport = new SqlServerTransport(SqlConnectionFactory.Default(connectionString).OpenNewConnection)
+            {
+                TransportTransactionMode = TransportTransactionMode.None,
+                TimeToWaitBeforeTriggeringCircuitBreaker = TimeSpan.MaxValue,
+            };
 
-            var pump = new MessagePump(
-                m => new ProcessWithNoTransaction(sqlConnectionFactory, null),
-                qa => qa == "input" ? (TableBasedQueue)inputQueue : new TableBasedQueue(parser.Parse(qa).QualifiedTableName, qa),
-                new QueuePurger(sqlConnectionFactory),
-                new ExpiredMessagesPurger(_ => sqlConnectionFactory.OpenNewConnection(), 0, false),
-                new QueuePeeker(sqlConnectionFactory, new QueuePeekerOptions()),
-                new SchemaInspector(_ => sqlConnectionFactory.OpenNewConnection()),
-                TimeSpan.MaxValue);
+            transport.Testing.QueueFactoryOverride = qa =>
+                qa == inputQueueAddress ? inputQueue : new TableBasedQueue(parser.Parse(qa).QualifiedTableName, qa, true);
 
-            await pump.Init(
-                _ => Task.FromResult(0),
-                _ => Task.FromResult(ErrorHandleResult.Handled),
-                new CriticalError(_ => Task.FromResult(0)),
-                new PushSettings("input", "error", false, TransportTransactionMode.None));
+            var receiveSettings = new ReceiveSettings("receiver", inputQueueAddress, true, false, "error");
+            var hostSettings = new HostSettings("IntegrationTests", string.Empty, new StartupDiagnosticEntries(),
+                (_, __, ___) => { },
+                true);
 
-            pump.Start(new PushRuntimeSettings(1));
+            var infrastructure = await transport.Initialize(hostSettings, new[] { receiveSettings }, new string[0]);
+
+            var receiver = infrastructure.Receivers.First().Value;
+
+            await receiver.Initialize(
+                new PushRuntimeSettings(1),
+                (_, __) => Task.CompletedTask,
+                (_, __) => Task.FromResult(ErrorHandleResult.Handled));
+
+            await receiver.StartReceive();
 
             await WaitUntil(() => inputQueue.NumberOfPeeks > 1);
 
-            await pump.Stop();
+            await receiver.StopReceive();
 
-            Assert.That(inputQueue.NumberOfReceives, Is.AtMost(successfulReceives + 2), "Pump should stop receives after first unsuccessful attempt.");
+            await infrastructure.Shutdown();
+
+            Assert.That(inputQueue.NumberOfReceives, Is.AtMost(successfulReceives + 2), "Receiver should stop receives after first unsuccessful attempt.");
         }
 
-        static async Task WaitUntil(Func<bool> condition, int timeoutInSeconds = 5)
+        static async Task WaitUntil(Func<bool> condition, int timeoutInSeconds = 5, CancellationToken cancellationToken = default)
         {
-            var startTime = DateTime.UtcNow;
+            var startTime = DateTime.UtcNow; //Local usage only
 
             while (DateTime.UtcNow.Subtract(startTime) < TimeSpan.FromSeconds(timeoutInSeconds))
             {
@@ -68,7 +77,7 @@
                     return;
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(1));
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
             }
 
             throw new Exception("Condition has not been met in predefined timespan.");
@@ -82,26 +91,26 @@
             int queueSize;
             int successfulReceives;
 
-            public FakeTableBasedQueue(string address, int queueSize, int successfulReceives) : base(address, "")
+            public FakeTableBasedQueue(string address, int queueSize, int successfulReceives) : base(address, "", true)
             {
                 this.queueSize = queueSize;
                 this.successfulReceives = successfulReceives;
             }
 
-            public override  Task<MessageReadResult> TryReceive(SqlConnection connection, SqlTransaction transaction)
+            public override Task<MessageReadResult> TryReceive(SqlConnection connection, SqlTransaction transaction, CancellationToken cancellationToken = default)
             {
-                NumberOfReceives ++;
+                NumberOfReceives++;
 
                 var readResult = NumberOfReceives <= successfulReceives
-                    ? MessageReadResult.Success(new Message("1", new Dictionary<string, string>(), new byte[0], false))
+                    ? MessageReadResult.Success(new Message("1", string.Empty, null, new byte[0], false))
                     : MessageReadResult.NoMessage;
 
                 return Task.FromResult(readResult);
             }
 
-            public override Task<int> TryPeek(SqlConnection connection, SqlTransaction transaction, CancellationToken token, int timeoutInSeconds = 30)
+            public override Task<int> TryPeek(SqlConnection connection, SqlTransaction transaction, int? timeoutInSeconds = null, CancellationToken cancellationToken = default)
             {
-                NumberOfPeeks ++;
+                NumberOfPeeks++;
 
                 return Task.FromResult(NumberOfPeeks == 1 ? queueSize : 0);
             }

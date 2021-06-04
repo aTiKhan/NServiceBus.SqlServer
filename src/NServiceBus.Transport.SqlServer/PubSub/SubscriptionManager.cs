@@ -1,10 +1,12 @@
 namespace NServiceBus.Transport.SqlServer
 {
-    using System;
+    using System.Linq;
+    using System.Threading;
     using System.Threading.Tasks;
     using Extensibility;
+    using NServiceBus.Unicast.Messages;
 
-    class SubscriptionManager : IManageSubscriptions
+    class SubscriptionManager : ISubscriptionManager
     {
         public SubscriptionManager(ISubscriptionStore subscriptionStore, string endpointName, string localAddress)
         {
@@ -13,14 +15,21 @@ namespace NServiceBus.Transport.SqlServer
             this.localAddress = localAddress;
         }
 
-        public Task Subscribe(Type eventType, ContextBag context)
+#pragma warning disable IDE0060 // Remove unused parameter
+        public Task Subscribe(MessageMetadata eventType, ContextBag context, CancellationToken cancellationToken = default)
+#pragma warning restore IDE0060 // Remove unused parameter
         {
-            return subscriptionStore.Subscribe(endpointName, localAddress, eventType);
+            return subscriptionStore.Subscribe(endpointName, localAddress, eventType.MessageType, cancellationToken);
         }
 
-        public Task Unsubscribe(Type eventType, ContextBag context)
+        public Task SubscribeAll(MessageMetadata[] eventTypes, ContextBag context, CancellationToken cancellationToken = default)
         {
-            return subscriptionStore.Unsubscribe(endpointName, eventType);
+            return Task.WhenAll(eventTypes.Select(et => Subscribe(et, context, cancellationToken)));
+        }
+
+        public Task Unsubscribe(MessageMetadata eventType, ContextBag context, CancellationToken cancellationToken = default)
+        {
+            return subscriptionStore.Unsubscribe(endpointName, eventType.MessageType, cancellationToken);
         }
 
         ISubscriptionStore subscriptionStore;

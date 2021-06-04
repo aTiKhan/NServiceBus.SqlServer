@@ -26,25 +26,27 @@
         {
             public Sender()
             {
-                EndpointSetup<DefaultServer>(c =>
+                EndpointSetup(new CustomizedServer(SenderConnectionString), (c, sd) =>
                 {
-                    var routing = c.UseTransport<SqlServerTransport>()
-                        .ConnectionString(SenderConnectionString)
-                        .UseCatalogForEndpoint(ReceiverEndpoint, "nservicebus2")
-                        .Routing();
+                    var routing = c.ConfigureRouting();
 
                     routing.RouteToEndpoint(typeof(Message), ReceiverEndpoint);
+                    routing.UseCatalogForEndpoint(ReceiverEndpoint, "nservicebus2");
                 });
             }
 
 
             class Handler : IHandleMessages<Reply>
             {
-                public Context Context { get; set; }
+                readonly Context scenarioContext;
+                public Handler(Context scenarioContext)
+                {
+                    this.scenarioContext = scenarioContext;
+                }
 
                 public Task Handle(Reply message, IMessageHandlerContext context)
                 {
-                    Context.ReplyReceived = true;
+                    scenarioContext.ReplyReceived = true;
 
                     return Task.FromResult(0);
                 }
@@ -55,16 +57,11 @@
         {
             public Receiver()
             {
-                EndpointSetup<DefaultServer>(c =>
-                {
-                    c.UseTransport<SqlServerTransport>().ConnectionString(ReceiverConnectionString);
-                });
+                EndpointSetup(new CustomizedServer(ReceiverConnectionString), (c, sd) => { });
             }
 
             class Handler : IHandleMessages<Message>
             {
-                public Context Context { get; set; }
-
                 public Task Handle(Message message, IMessageHandlerContext context)
                 {
                     return context.Reply(new Reply());

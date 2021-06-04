@@ -3,7 +3,6 @@
     using System;
     using System.Threading.Tasks;
     using AcceptanceTesting;
-    using NServiceBus.AcceptanceTests.EndpointTemplates;
     using NUnit.Framework;
 
     public class When_configured_error_queue_includes_catalog : MultiCatalogAcceptanceTest
@@ -39,7 +38,9 @@
         {
             public Sender()
             {
-                EndpointSetup<DefaultServer>(c =>
+                var transport = new SqlServerTransport(SenderConnectionString);
+
+                EndpointSetup(new CustomizedServer(transport), (c, rd) =>
                 {
                     var errorSpyName = AcceptanceTesting.Customization.Conventions.EndpointNamingConvention(typeof(ErrorSpy));
 
@@ -48,9 +49,6 @@
                     c.Recoverability()
                         .Immediate(i => i.NumberOfRetries(0))
                         .Delayed(d => d.NumberOfRetries(0));
-
-                    c.UseTransport<SqlServerTransport>()
-                        .ConnectionString(SenderConnectionString);
                 });
             }
 
@@ -67,20 +65,20 @@
         {
             public ErrorSpy()
             {
-                EndpointSetup<DefaultServer>(c =>
-                {
-                    c.UseTransport<SqlServerTransport>()
-                        .ConnectionString(SpyConnectionString);
-                });
+                EndpointSetup(new CustomizedServer(SpyConnectionString), (c, sd) => { });
             }
 
             class Handler : IHandleMessages<Message>
             {
-                public Context Context { get; set; }
+                readonly Context scenarioContext;
+                public Handler(Context scenarioContext)
+                {
+                    this.scenarioContext = scenarioContext;
+                }
 
                 public Task Handle(Message message, IMessageHandlerContext context)
                 {
-                    Context.FailedMessageProcessed = true;
+                    scenarioContext.FailedMessageProcessed = true;
 
                     return Task.FromResult(0);
                 }
